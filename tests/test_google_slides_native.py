@@ -1171,6 +1171,7 @@ class WendyWuQbrNativeSlidesTests(unittest.TestCase):
         self.assertEqual(cell_text(1, 2), ["n/a"])
         self.assertEqual(cell_text(2, 0), ["audleytravel.com"])
 
+        # Last fill per row wins, matching the order Slides applies batch requests.
         fills = {
             request["updateTableCellProperties"]["tableRange"]["location"]["rowIndex"]: request[
                 "updateTableCellProperties"
@@ -1180,7 +1181,28 @@ class WendyWuQbrNativeSlidesTests(unittest.TestCase):
         }
         self.assertEqual(fills[0], {"red": 0.0, "green": 0.0, "blue": 0.0})
         self.assertEqual(fills[1], {"red": 0.988, "green": 0.894, "blue": 0.925})
-        self.assertNotIn(2, fills)
+        self.assertEqual(fills[2], {"red": 1.0, "green": 1.0, "blue": 1.0})
+        border_requests = [
+            request["updateTableBorderProperties"]
+            for request in requests
+            if request.get("updateTableBorderProperties", {}).get("objectId") == "p29_i720"
+        ]
+        self.assertEqual(len(border_requests), 1)
+        self.assertEqual(border_requests[0]["borderPosition"], "ALL")
+        self.assertEqual(
+            border_requests[0]["tableRange"],
+            {"location": {"rowIndex": 0, "columnIndex": 0}, "rowSpan": 3, "columnSpan": 7},
+        )
+        self.assertEqual(
+            border_requests[0]["tableBorderProperties"]["tableBorderFill"]["solidFill"]["color"]["rgbColor"],
+            {"red": 0.796, "green": 0.835, "blue": 0.882},
+        )
+        self.assertFalse(
+            any(
+                request.get("updateTableBorderProperties", {}).get("objectId") not in (None, "p29_i720")
+                for request in requests
+            )
+        )
         self.assertTrue(
             any(
                 request.get("insertText", {}).get("objectId") == "p29_i718"

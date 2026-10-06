@@ -120,6 +120,9 @@ AUCTION_MAX_BODY_ROWS = 8
 AUCTION_PREFERRED_SOURCE = "Google Ads"
 AUCTION_OWN_DOMAIN = "you"
 AUCTION_HIGHLIGHT_RGB = {"red": 0.988, "green": 0.894, "blue": 0.925}
+# Template table border grey (#CBD5E1, 0.75pt).
+AUCTION_BORDER_RGB = {"red": 0.796, "green": 0.835, "blue": 0.882}
+AUCTION_BORDER_WEIGHT_EMU = 9525
 
 
 SUMMARY_SLIDES: dict[str, dict[str, Any]] = {
@@ -404,7 +407,7 @@ def generate_wendy_wu_qbr_google_slides(
                 )
             )
             requests_body.extend(
-                _table_fill_requests(table_id, table_payload)
+                _table_style_requests(table_id, table_payload)
             )
 
         uploaded_assets = _upload_chart_assets(asset_store, payload["charts"])
@@ -1038,6 +1041,9 @@ def _auction_table_payload(body_rows: Sequence[Sequence[str]]) -> dict[str, Any]
     return {
         "values": [list(AUCTION_HEADERS), *(list(row) for row in body_rows)],
         "header_fill_rgb": BLACK_RGB,
+        # Reset template row fills so only the client row is highlighted.
+        "body_fill_rgb": WHITE_RGB,
+        "border_rgb": AUCTION_BORDER_RGB,
         "highlight_rows": [
             index
             for index, row in enumerate(body_rows, start=1)
@@ -1047,7 +1053,7 @@ def _auction_table_payload(body_rows: Sequence[Sequence[str]]) -> dict[str, Any]
     }
 
 
-def _table_fill_requests(
+def _table_style_requests(
     table_id: str, table_payload: Mapping[str, Any]
 ) -> list[dict[str, Any]]:
     values = table_payload.get("values") or []
@@ -1057,6 +1063,11 @@ def _table_fill_requests(
     fills: list[tuple[int, dict[str, float]]] = []
     if table_payload.get("header_fill_rgb"):
         fills.append((0, table_payload["header_fill_rgb"]))
+    if table_payload.get("body_fill_rgb"):
+        fills.extend(
+            (row_index, table_payload["body_fill_rgb"])
+            for row_index in range(1, len(values))
+        )
     highlight_rgb = table_payload.get("highlight_fill_rgb")
     if highlight_rgb:
         fills.extend(
@@ -1064,7 +1075,7 @@ def _table_fill_requests(
             for row_index in table_payload.get("highlight_rows") or []
             if 0 < int(row_index) < len(values)
         )
-    return [
+    requests_body = [
         {
             "updateTableCellProperties": {
                 "objectId": table_id,
@@ -1081,6 +1092,29 @@ def _table_fill_requests(
         }
         for row_index, rgb in fills
     ]
+    border_rgb = table_payload.get("border_rgb")
+    if border_rgb:
+        # Overwrite leftover template border colours (e.g. old highlight rows).
+        requests_body.append(
+            {
+                "updateTableBorderProperties": {
+                    "objectId": table_id,
+                    "tableRange": {
+                        "location": {"rowIndex": 0, "columnIndex": 0},
+                        "rowSpan": len(values),
+                        "columnSpan": column_count,
+                    },
+                    "borderPosition": "ALL",
+                    "tableBorderProperties": {
+                        "tableBorderFill": {"solidFill": {"color": {"rgbColor": border_rgb}}},
+                        "weight": {"magnitude": AUCTION_BORDER_WEIGHT_EMU, "unit": "EMU"},
+                        "dashStyle": "SOLID",
+                    },
+                    "fields": "tableBorderFill.solidFill.color,weight,dashStyle",
+                }
+            }
+        )
+    return requests_body
 
 
 def _populate_review_required_sections(
