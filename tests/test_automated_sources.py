@@ -740,6 +740,39 @@ class AutomatedSourcesTests(unittest.TestCase):
         self.assertEqual(frame["term"].drop_duplicates().tolist(), ["japan holidays"])
         self.assertEqual(frame["value"].tolist(), [30.0, 45.0, 40.0, 80.0])
 
+    def test_dataforseo_null_weeks_become_zero_except_partial_week(self) -> None:
+        response = {
+            "tasks": [
+                {
+                    "result": [
+                        {
+                            "keywords": ["wightlink ferries"],
+                            "items": [
+                                {
+                                    "type": "google_trends_graph",
+                                    "keywords": ["wightlink ferries"],
+                                    "data": [
+                                        {"date_from": "2026-01-04", "values": [None], "missing_data": False},
+                                        {"date_from": "2026-01-11", "values": [63], "missing_data": False},
+                                        {"date_from": "2026-01-18", "values": [None]},
+                                        {"date_from": "2026-01-25", "values": [None], "missing_data": True},
+                                    ],
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
+
+        frame = dataforseo_response_to_frame(response, fallback_keyword="wightlink ferries")
+
+        self.assertEqual(
+            frame["date"].dt.strftime("%Y-%m-%d").tolist(),
+            ["2026-01-04", "2026-01-11", "2026-01-18"],
+        )
+        self.assertEqual(frame["value"].tolist(), [0.0, 63.0, 0.0])
+
     def test_dataforseo_source_writes_current_and_previous_ytd_csvs(self) -> None:
         client_config = {
             "id": "wendy_wu",

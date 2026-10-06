@@ -30,9 +30,21 @@ def build_trends_narrative(trend_section: dict[str, Any] | None, fallback: list[
     peak_index = _peak_index(primary.get("data", []))
     if peak_index is not None and peak_index < len(labels):
         bullets.append(f"Peak search interest landed in {labels[peak_index]}.")
-    if len(series) >= 2:
+    zero_weeks = int(trend_section.get("zero_weeks") or 0)
+    total_weeks = int(trend_section.get("total_weeks") or 0)
+    low_volume = total_weeks > 0 and zero_weeks / total_weeks >= LOW_VOLUME_ZERO_WEEK_SHARE
+    if low_volume:
+        bullets.append(
+            f"Search volume for this term is low: Google Trends reported no measurable interest in "
+            f"{zero_weeks} of {total_weeks} weeks (shown as 0), so treat month-to-month moves as directional."
+        )
+    elif len(series) >= 2:
         bullets.append("The current pattern broadly mirrors the prior comparison series.")
     return bullets or list(fallback or [])
+
+
+# Share of zero-interest weeks above which a trend term is called out as low volume.
+LOW_VOLUME_ZERO_WEEK_SHARE = 0.25
 
 
 def build_generic_auction_narrative(auction_section: dict[str, Any] | None, fallback: list[str] | None = None) -> list[str]:

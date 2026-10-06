@@ -1026,7 +1026,12 @@ def dataforseo_response_to_frame(
                     )
                     for keyword, value in values:
                         if value is None or pd.isna(value):
-                            continue
+                            # Google Trends reports null for weeks below its volume
+                            # threshold; the Trends UI shows these as 0. Only the
+                            # flagged partial (latest) week is genuinely missing.
+                            if point.get("missing_data"):
+                                continue
+                            value = 0.0
                         records.append(
                             {"date": point_date, "term": keyword, "value": float(value)}
                         )

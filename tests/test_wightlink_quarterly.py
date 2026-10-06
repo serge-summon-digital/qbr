@@ -10,6 +10,8 @@ from report_generator.parsers.wightlink_auction_parser import parse_wightlink_au
 from report_generator.parsers.wightlink_monthly_performance_parser import parse_wightlink_monthly_performance_csv
 from report_generator.parsers.wightlink_performance_parser import parse_wightlink_performance_csv
 from report_generator.parsers.wightlink_plan_parser import parse_wightlink_plan_workbook
+from report_generator.narratives.wightlink_narratives import build_trends_narrative
+from report_generator.parsers.wightlink_performance_common import QuarterWindow
 from report_generator.parsers.wightlink_ytd_parser import derive_ytd_windows, parse_ytd_trend_inputs
 from report_generator.pipelines.wightlink_monthly_pipeline import generate_wightlink_monthly_report
 from report_generator.pipelines.wightlink_pipeline import generate_wightlink_report
@@ -19,6 +21,48 @@ PACK_V2 = Path(__file__).resolve().parent / "fixtures" / "wightlink_v2_sample_in
 
 
 class WightlinkQuarterlyTests(unittest.TestCase):
+    def test_low_volume_trend_counts_zero_weeks_and_flags_narrative(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            current_dir, previous_dir = root / "current", root / "previous"
+            current_dir.mkdir()
+            previous_dir.mkdir()
+            current_weeks = pd.date_range("2026-01-04", "2026-09-27", freq="7D")
+            previous_weeks = pd.date_range("2025-01-05", "2025-09-28", freq="7D")
+            # Two of every three weeks have no measurable interest.
+            pd.DataFrame(
+                {"Week": current_weeks.strftime("%Y-%m-%d"), "Wightlink Ferries": [60 if i % 3 == 0 else 0 for i in range(len(current_weeks))]}
+            ).to_csv(current_dir / "wightlink_ferries_current_ytd.csv", index=False)
+            pd.DataFrame(
+                {"Week": previous_weeks.strftime("%Y-%m-%d"), "Wightlink Ferries": [70 if i % 3 == 0 else 0 for i in range(len(previous_weeks))]}
+            ).to_csv(previous_dir / "wightlink_ferries_previous_ytd.csv", index=False)
+
+            sections = parse_ytd_trend_inputs(current_dir, previous_dir, QuarterWindow(2026, 3))
+
+        self.assertEqual(len(sections), 1)
+        section = sections[0]
+        self.assertTrue(all(value is not None for value in section["series"][0]["data"]))
+        self.assertTrue(all(value is not None for value in section["series"][1]["data"]))
+        # Weeks are bucketed by midpoint, so a week straddling the YTD end is excluded.
+        self.assertGreaterEqual(section["total_weeks"], len(current_weeks) + len(previous_weeks) - 2)
+        self.assertGreater(section["zero_weeks"] / section["total_weeks"], 0.6)
+
+        bullets = build_trends_narrative(section)
+        self.assertTrue(any("Search volume for this term is low" in bullet for bullet in bullets))
+        self.assertFalse(any("broadly mirrors" in bullet for bullet in bullets))
+
+    def test_normal_volume_trend_keeps_mirror_narrative(self) -> None:
+        section = {
+            "labels": ["Jan", "Feb", "Mar"],
+            "series": [{"data": [40, 50, 60]}, {"data": [42, 48, 61]}],
+            "separate_normalized_exports": True,
+            "zero_weeks": 0,
+            "total_weeks": 26,
+        }
+        bullets = build_trends_narrative(section)
+        self.assertIn("The current pattern broadly mirrors the prior comparison series.", bullets)
+        self.assertFalse(any("Search volume for this term is low" in bullet for bullet in bullets))
+
     def test_quarterly_pipeline_builds_requested_wightlink_slides(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -138,6 +138,10 @@ def _build_paired_ytd_section(
         current_source_file=current_export["source_file"],
         previous_source_file=previous_export["source_file"],
         separate_exports=separate_exports,
+        zero_week_counts=_zero_week_counts(
+            _window_rows(current_export["rows"], windows.current_start, windows.current_end),
+            _window_rows(previous_export["rows"], windows.previous_start, windows.previous_end),
+        ),
     )
 
 
@@ -155,6 +159,10 @@ def _build_combined_ytd_section(export: dict[str, Any], windows: YTDWindows) -> 
         current_source_file=export["source_file"],
         previous_source_file=export["source_file"],
         separate_exports=False,
+        zero_week_counts=_zero_week_counts(
+            _window_rows(export["rows"], windows.current_start, windows.current_end),
+            _window_rows(export["rows"], windows.previous_start, windows.previous_end),
+        ),
     )
 
 
@@ -168,6 +176,7 @@ def _section_payload(
     current_source_file: str,
     previous_source_file: str,
     separate_exports: bool,
+    zero_week_counts: tuple[int, int] = (0, 0),
 ) -> dict[str, Any]:
     normalization_note = (
         "Google Trends current and previous YTD series were supplied as separate normalized exports."
@@ -192,7 +201,23 @@ def _section_payload(
         "previous_ytd_period_label": windows.previous_ytd_period_label,
         "separate_normalized_exports": separate_exports,
         "normalization_note": normalization_note,
+        "zero_weeks": zero_week_counts[0],
+        "total_weeks": zero_week_counts[1],
     }
+
+
+def _window_rows(rows: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    if rows.empty:
+        return rows
+    midpoint = rows["date"] + pd.Timedelta(days=3)
+    return rows[(midpoint >= start) & (midpoint <= end)]
+
+
+def _zero_week_counts(*frames: pd.DataFrame) -> tuple[int, int]:
+    """Weeks where Google Trends reported no measurable interest (value 0)."""
+    zero = sum(int((frame["value"] == 0).sum()) for frame in frames if not frame.empty)
+    total = sum(len(frame) for frame in frames)
+    return zero, total
 
 
 def _monthly_values(rows: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> list[float | None]:
