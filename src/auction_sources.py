@@ -17,6 +17,10 @@ AUCTION_SOURCE_LABELS = {
     "ms_ads": "Microsoft Ads",
 }
 
+# Clients whose QBR can run without Auction Insights uploads: impression share is
+# often below the 10% threshold, so Google/Microsoft Ads provide no export.
+OPTIONAL_AUCTION_CLIENT_IDS = frozenset({"olympic_holidays"})
+
 EXPORT_COLUMNS = [
     ("source", "Source"),
     ("domain", "Display URL domain"),
@@ -96,6 +100,7 @@ def _format_export_percent(value) -> str:
 
 
 __all__ = [
+    "OPTIONAL_AUCTION_CLIENT_IDS",
     "load_cross_platform_auction_csvs",
     "write_cross_platform_auction_csv",
 ]

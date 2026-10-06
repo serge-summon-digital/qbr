@@ -525,7 +525,7 @@ def _prepare_olympic_qbr_data(
             "microsoft_ads_auction_insights_csv": str(
                 auction["sources"].get("Microsoft Ads") or ""
             ),
-            "auction_insights_required": True,
+            "auction_insights_required": False,
             "auction_insights_same_period_required": True,
         },
         "warnings": warnings,
@@ -577,12 +577,24 @@ def _build_trend_payloads(
     return {"sections": sections, "warnings": warnings}
 
 
+OLYMPIC_AUCTION_HEADERS = (
+    "Source",
+    "Domain",
+    "Imp. Share",
+    "Overlap",
+    "Pos. Above",
+    "Top Page",
+    "Abs. Top",
+    "Outrank",
+)
+
+
 def _build_auction_payload(request_dir: Path) -> dict[str, Any]:
     warnings: list[str] = []
     sources = _resolve_manual_auction_sources(request_dir)
     expected_sources = {"Google Ads", "Microsoft Ads"}
     missing = sorted(expected_sources - set(sources))
-    if missing:
+    if sources and missing:
         warnings.append(
             "Olympic Holidays QBR Auction Insights is missing manual upload(s): "
             + ", ".join(missing)
@@ -597,19 +609,29 @@ def _build_auction_payload(request_dir: Path) -> dict[str, Any]:
     if not auction_df.empty:
         auction_df = _filter_auction_competitors(auction_df)
 
+    if auction_df.empty and not sources and not _resolve_manual_auction_path(request_dir):
+        # Uploads are optional for Olympic: below 10% impression share the platforms
+        # do not provide an Auction Insights export.
+        warnings.append(
+            "Olympic Holidays QBR Auction Insights was not uploaded; auction slide marked as not available."
+        )
+        return {
+            "table_values": [
+                list(OLYMPIC_AUCTION_HEADERS),
+                ["Not available", "No Auction Insights export", "n/a", "n/a", "n/a", "n/a", "n/a", "n/a"],
+            ],
+            "bullets": [
+                "Auction Insights is not available for this period: Olympic Holidays' impression share "
+                "was below the 10% threshold Google Ads and Microsoft Ads need to report competitor data.",
+            ],
+            "sources": sources,
+            "warnings": warnings,
+        }
+
     if auction_df.empty:
         return {
             "table_values": [
-                [
-                    "Source",
-                    "Domain",
-                    "Imp. Share",
-                    "Overlap",
-                    "Pos. Above",
-                    "Top Page",
-                    "Abs. Top",
-                    "Outrank",
-                ],
+                list(OLYMPIC_AUCTION_HEADERS),
                 ["Review required", "Upload Google Ads and Microsoft Ads CSVs", "", "", "", "", "", ""],
             ],
             "bullets": [

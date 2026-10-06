@@ -1526,8 +1526,51 @@ class OlympicQBRNativeSlidesTests(unittest.TestCase):
         self.assertIn("Google Ads", rows_text)
         self.assertIn("Microsoft Ads", rows_text)
         self.assertNotIn(" you ", f" {rows_text} ")
-        self.assertEqual(payload["manual_inputs"]["auction_insights_required"], True)
+        self.assertEqual(payload["manual_inputs"]["auction_insights_required"], False)
         self.assertEqual(payload["warnings"], [])
+
+    def test_qbr_payload_marks_auction_not_available_without_uploads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            artifact_path = _write_olympic_qbr_artifact(root)
+            shutil.rmtree(root / "auction")
+
+            payload = build_olympic_qbr_slides_payload(
+                request_dir=root,
+                artifact=json.loads(artifact_path.read_text(encoding="utf-8")),
+            )
+
+        auction_table = payload["tables"]["p5_i154"]["values"]
+        self.assertEqual(len(auction_table[0]), 8)
+        self.assertEqual(auction_table[1][0], "Not available")
+        self.assertNotIn("Review required", json.dumps(auction_table))
+        self.assertTrue(
+            any("below the 10% threshold" in text for text in payload["shape_text"].values())
+        )
+        self.assertEqual(payload["manual_inputs"]["auction_insights_required"], False)
+        self.assertEqual(
+            payload["warnings"],
+            ["Olympic Holidays QBR Auction Insights was not uploaded; auction slide marked as not available."],
+        )
+
+    def test_qbr_payload_uses_single_platform_auction_upload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            artifact_path = _write_olympic_qbr_artifact(root)
+            shutil.rmtree(root / "auction" / "microsoft_ads")
+
+            payload = build_olympic_qbr_slides_payload(
+                request_dir=root,
+                artifact=json.loads(artifact_path.read_text(encoding="utf-8")),
+            )
+
+        rows_text = json.dumps(payload["tables"]["p5_i154"]["values"])
+        self.assertIn("Google Ads", rows_text)
+        self.assertNotIn("Microsoft Ads", rows_text)
+        self.assertEqual(
+            payload["warnings"],
+            ["Olympic Holidays QBR Auction Insights is missing manual upload(s): Microsoft Ads."],
+        )
 
     def test_qbr_native_slides_uses_custom_builder_template_and_assets(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

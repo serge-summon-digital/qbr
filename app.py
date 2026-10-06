@@ -23,7 +23,7 @@ from main import run_report, run_text_report
 from notion_memory import NotionMemoryError, notion_save_key, save_report_to_notion
 from presentation_prompt_builder import build_presentation_prompt
 from src.automated_sources import AutomatedSourceError, generate_wightlink_plan_sheet_csv
-from src.auction_sources import write_cross_platform_auction_csv
+from src.auction_sources import OPTIONAL_AUCTION_CLIENT_IDS, write_cross_platform_auction_csv
 from src.env_utils import load_env_file, load_streamlit_secrets_into_env
 
 
@@ -361,9 +361,16 @@ def main() -> None:
             else:
                 market_label = "UK" if client_id == "wendy_wu" else "Australia"
                 upload_label = f"Wendy Wu {market_label}"
-            st.info(
-                f"{upload_label} QBR Auction Insights needs both Google Ads and Microsoft Ads exports for the same report period."
-            )
+            if client_id in OPTIONAL_AUCTION_CLIENT_IDS:
+                st.info(
+                    f"{upload_label} QBR Auction Insights is optional. Upload the Google Ads and Microsoft Ads "
+                    "exports for the same report period if they are available; if impression share is below 10% "
+                    "and no export exists, leave them blank and the auction slide will be marked as not available."
+                )
+            else:
+                st.info(
+                    f"{upload_label} QBR Auction Insights needs both Google Ads and Microsoft Ads exports for the same report period."
+                )
             google_auction_file = st.file_uploader(
                 f"{upload_label} Google Ads Auction Insights CSV",
                 type=["csv"],
@@ -452,8 +459,10 @@ def main() -> None:
         if performance_file is None:
             st.error("Please upload a performance CSV")
             return
-        if use_cross_platform_auction and (
-            google_auction_file is None or microsoft_auction_file is None
+        if (
+            use_cross_platform_auction
+            and client_id not in OPTIONAL_AUCTION_CLIENT_IDS
+            and (google_auction_file is None or microsoft_auction_file is None)
         ):
             st.error(
                 "Please upload both Google Ads and Microsoft Ads Auction Insights CSVs for the same QBR period."
