@@ -325,7 +325,7 @@ class WendyWuQbrTests(unittest.TestCase):
 
                 aliases = client_config["destination_aliases"]["SE Asia"]
                 for destination in ("Vietnam", "Cambodia", "Vietnam & Cambodia", "Vietnam and Cambodia",
-                                    "Thailand", "Malaysia", "Indonesia", "Borneo", "Philippines"):
+                                    "Thailand", "Malaysia", "Indonesia", "Borneo", "Philippines", "Laos"):
                     self.assertIn(destination, aliases)
 
         uk_config = CONFIG_LOADER.get_client_config("wendy_wu")
@@ -589,6 +589,7 @@ SE_ASIA_FIXTURE_DESTINATIONS = (
     "Indonesia",
     "Borneo",
     "Philippines",
+    "Laos",
     "SE Asia",
 )
 
@@ -600,7 +601,7 @@ def _write_se_asia_fixture() -> Path:
             date = f"01/{month:02d}/{year}"
             # Only Q1 2026 carries costs so totals are easy to assert.
             factor = 1.0 if (year == 2026 and month == 1) else 0.0
-            for destination, cost in (("China", 100), ("Japan", 200), ("India", 300), ("Laos", 40)):
+            for destination, cost in (("China", 100), ("Japan", 200), ("India", 300), ("Sri Lanka", 40)):
                 rows.append(
                     {"Date": date, "Campaign Type": "Generic", "Destination": destination, "Impressions": 1000,
                      "Clicks": 100, "Cost": cost * factor, "Sales Leads": 5 * factor}

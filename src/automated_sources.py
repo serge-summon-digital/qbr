@@ -1763,6 +1763,7 @@ WENDY_WU_SE_ASIA_TERMS = (
     "indonesia",
     "borneo",
     "philippines",
+    "laos",
 )
 
 

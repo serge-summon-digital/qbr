@@ -389,7 +389,7 @@ class AutomatedSourcesTests(unittest.TestCase):
             "AUS - Generic - Borneo": "SE Asia",
             "AUS - Generic - Philippines": "SE Asia",
             "aus_generic_PHILIPPINES": "SE Asia",
-            "AUS - Generic - Laos - General": "Other",
+            "AUS - Generic - Laos - General": "SE Asia",
             "AUS - Generic - Central Asia": "Other",
             "AUS - Generic - Mongolia": "Other",
         }
@@ -415,7 +415,7 @@ class AutomatedSourcesTests(unittest.TestCase):
             "UK - Generic - Borneo": "SE Asia",
             "UK - Generic - Philippines": "SE Asia",
             "UK-Generic-(Thailand)": "SE Asia",
-            "UK - Generic - Laos - General": "Other",
+            "UK - Generic - Laos - General": "SE Asia",
             "UK - Generic - Central Asia - General": "Central Asia",
             "UK - Generic - Mongolia": "Central Asia",
         }
