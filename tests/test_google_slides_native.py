@@ -820,39 +820,123 @@ class WendyWuQbrNativeSlidesTests(unittest.TestCase):
             "wendy_wu_australia",
         )
 
-    def test_qbr_payload_combines_google_and_microsoft_auction_sources(self) -> None:
+    def test_qbr_payload_auction_table_matches_non_brand_slide_layout(self) -> None:
+        for client_id, client_name in (
+            ("wendy_wu", "Wendy Wu Tours"),
+            ("wendy_wu_australia", "Wendy Wu Tours Australia"),
+        ):
+            with self.subTest(client_id=client_id), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                artifact_path = _write_wendy_wu_qbr_artifact(
+                    root, client_id=client_id, client_name=client_name
+                )
+                _write_platform_auction_csv(
+                    root / "auction" / "google_ads" / "google_auction.csv",
+                    [
+                        (
+                            "audleytravel.com",
+                            "17.37%",
+                            "23.62%",
+                            "61.40%",
+                            "81.54%",
+                            "31.14%",
+                            "12.28%",
+                        ),
+                        ("you", "20.34%", "--", "--", "79.88%", "18.82%", "--"),
+                        (
+                            "intrepidtravel.com",
+                            "< 10%",
+                            "9.51%",
+                            "40.00%",
+                            "70.10%",
+                            "22.00%",
+                            "15.00%",
+                        ),
+                        (
+                            "riviera.co.uk",
+                            "11.00%",
+                            "12.00%",
+                            "50.00%",
+                            "60.00%",
+                            "20.00%",
+                            "18.00%",
+                        ),
+                    ],
+                )
+                _write_platform_auction_csv(
+                    root / "auction" / "microsoft_ads" / "microsoft_auction.csv",
+                    [
+                        ("you", "2.32%", "--", "--", "37.48%", "19.67%", "--"),
+                        (
+                            "microsoftonly.com",
+                            "1.01%",
+                            "3.62%",
+                            "65.20%",
+                            "71.44%",
+                            "38.10%",
+                            "2.27%",
+                        ),
+                    ],
+                )
+
+                payload = build_wendy_wu_qbr_slides_payload(
+                    request_dir=root,
+                    artifact=json.loads(artifact_path.read_text(encoding="utf-8")),
+                    client_id=client_id,
+                )
+
+            auction_table = payload["tables"]["p29_i720"]
+            self.assertEqual(
+                auction_table["values"],
+                [
+                    [
+                        "Domain",
+                        "Imp. Share",
+                        "Overlap Rate",
+                        "Pos. Above",
+                        "Top of Page",
+                        "Abs. Top",
+                        "Outranking",
+                    ],
+                    ["You", "20.3%", "n/a", "n/a", "79.9%", "18.8%", "n/a"],
+                    ["audleytravel.com", "17.4%", "23.6%", "61.4%", "81.5%", "31.1%", "12.3%"],
+                    ["riviera.co.uk", "11.0%", "12.0%", "50.0%", "60.0%", "20.0%", "18.0%"],
+                    ["intrepidtravel.com", "n/a", "9.5%", "40.0%", "70.1%", "22.0%", "15.0%"],
+                ],
+            )
+            self.assertEqual(auction_table["highlight_rows"], [1])
+            self.assertEqual(
+                auction_table["header_fill_rgb"], {"red": 0.0, "green": 0.0, "blue": 0.0}
+            )
+            self.assertEqual(
+                payload["shape_text"]["p29_i714"], "Non-Brand Auction Insights"
+            )
+            self.assertEqual(payload["shape_text"]["p29_i715"], payload["period"]["subtitle"])
+            self.assertEqual(
+                payload["shape_text"]["p29_i718"], "Source: Google Ads Auction Insights"
+            )
+            bullets = payload["shape_text"]["p29_i719"]
+            self.assertIn("Our impression share is 20.34%", bullets)
+            self.assertNotIn("you,", bullets.lower())
+            self.assertNotIn("microsoftonly.com", json.dumps(auction_table))
+            self.assertTrue(
+                payload["manual_inputs"]["google_ads_auction_insights_csv"].endswith(
+                    "google_auction.csv"
+                )
+            )
+            self.assertTrue(
+                payload["manual_inputs"]["microsoft_ads_auction_insights_csv"].endswith(
+                    "microsoft_auction.csv"
+                )
+            )
+
+    def test_qbr_payload_auction_table_falls_back_to_available_platform(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             artifact_path = _write_wendy_wu_qbr_artifact(root)
             _write_platform_auction_csv(
-                root / "auction" / "google_ads" / "google_auction.csv",
-                [
-                    ("you", "14.37%", "--", "--", "79.88%", "18.82%", "--"),
-                    (
-                        "audleytravel.com",
-                        "17.37%",
-                        "23.62%",
-                        "61.40%",
-                        "81.54%",
-                        "31.14%",
-                        "12.28%",
-                    ),
-                ],
-            )
-            _write_platform_auction_csv(
                 root / "auction" / "microsoft_ads" / "microsoft_auction.csv",
-                [
-                    ("you", "2.32%", "--", "--", "37.48%", "19.67%", "--"),
-                    (
-                        "audleytravel.com",
-                        "1.01%",
-                        "3.62%",
-                        "65.20%",
-                        "71.44%",
-                        "38.10%",
-                        "2.27%",
-                    ),
-                ],
+                [("you", "2.32%", "--", "--", "37.48%", "19.67%", "--")],
             )
 
             payload = build_wendy_wu_qbr_slides_payload(
@@ -860,37 +944,40 @@ class WendyWuQbrNativeSlidesTests(unittest.TestCase):
                 artifact=json.loads(artifact_path.read_text(encoding="utf-8")),
             )
 
-        auction_values = payload["tables"]["p29_i720"]["values"]
         self.assertEqual(
-            auction_values[0],
-            [
-                "Source",
-                "Domain",
-                "Impression Share",
-                "Overlap Rate",
-                "Position Above Rate",
-                "Top of Page Rate",
-                "Absolute Top Rate",
-                "Outranking Share",
-            ],
+            payload["tables"]["p29_i720"]["values"][1],
+            ["You", "2.3%", "n/a", "n/a", "37.5%", "19.7%", "n/a"],
         )
-        rows_text = "\n".join(" ".join(row) for row in auction_values)
-        self.assertIn("Google Ads", rows_text)
-        self.assertIn("Microsoft Ads", rows_text)
-        self.assertGreaterEqual(rows_text.count("audleytravel.com"), 2)
-        self.assertIn(
-            "Google Ads and Microsoft Ads rows are shown separately",
-            payload["shape_text"]["p29_i719"],
+        self.assertEqual(
+            payload["shape_text"]["p29_i718"], "Source: Microsoft Ads Auction Insights"
         )
         self.assertTrue(
-            payload["manual_inputs"]["google_ads_auction_insights_csv"].endswith(
-                "google_auction.csv"
-            )
+            any("missing the manual Google Ads upload" in w for w in payload["warnings"])
         )
-        self.assertTrue(
-            payload["manual_inputs"]["microsoft_ads_auction_insights_csv"].endswith(
-                "microsoft_auction.csv"
+
+    def test_qbr_auction_table_keeps_own_row_when_competitors_exceed_rows(self) -> None:
+        rows = [
+            (f"competitor{index}.com", f"{50 - index}.00%", "10.00%", "10.00%", "10.00%", "10.00%", "10.00%")
+            for index in range(10)
+        ]
+        rows.append(("you", "5.00%", "--", "--", "50.00%", "10.00%", "--"))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            artifact_path = _write_wendy_wu_qbr_artifact(root)
+            _write_platform_auction_csv(
+                root / "auction" / "google_ads" / "google_auction.csv", rows
             )
+            payload = build_wendy_wu_qbr_slides_payload(
+                request_dir=root,
+                artifact=json.loads(artifact_path.read_text(encoding="utf-8")),
+            )
+
+        values = payload["tables"]["p29_i720"]["values"]
+        self.assertEqual(len(values), 9)
+        self.assertEqual(values[1][0], "You")
+        self.assertEqual(
+            [row[0] for row in values[2:]],
+            [f"competitor{index}.com" for index in range(7)],
         )
 
     def test_qbr_native_slides_generate_expected_table_chart_and_style_requests(
@@ -1029,13 +1116,16 @@ class WendyWuQbrNativeSlidesTests(unittest.TestCase):
         )
         self.assertEqual(len(fake_client.deleted_permissions), fake_client.upload_count)
 
-    def test_qbr_native_slides_inserts_source_column_for_platform_auction(self) -> None:
+    def test_qbr_native_slides_style_auction_table_without_source_column(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             artifact_path = _write_wendy_wu_qbr_artifact(root)
             _write_platform_auction_csv(
                 root / "auction" / "google_ads" / "google_auction.csv",
-                [("you", "14.37%", "--", "--", "79.88%", "18.82%", "--")],
+                [
+                    ("audleytravel.com", "17.37%", "23.62%", "61.40%", "81.54%", "31.14%", "12.28%"),
+                    ("you", "14.37%", "--", "--", "79.88%", "18.82%", "--"),
+                ],
             )
             _write_platform_auction_csv(
                 root / "auction" / "microsoft_ads" / "microsoft_auction.csv",
@@ -1057,28 +1147,45 @@ class WendyWuQbrNativeSlidesTests(unittest.TestCase):
             )
 
         self.assertEqual(result.status, "success")
-        self.assertTrue(
+        requests = fake_client.batch_requests
+        self.assertFalse(
             any(
                 request.get("insertTableColumns", {}).get("tableObjectId") == "p29_i720"
-                for request in fake_client.batch_requests
+                or request.get("deleteTableColumn", {}).get("tableObjectId") == "p29_i720"
+                for request in requests
             )
         )
+
+        def cell_text(row: int, column: int) -> list[str]:
+            return [
+                request["insertText"]["text"]
+                for request in requests
+                if request.get("insertText", {}).get("objectId") == "p29_i720"
+                and request["insertText"].get("cellLocation")
+                == {"rowIndex": row, "columnIndex": column}
+            ]
+
+        self.assertEqual(cell_text(0, 0), ["Domain"])
+        self.assertEqual(cell_text(0, 1), ["Imp. Share"])
+        self.assertEqual(cell_text(1, 0), ["You"])
+        self.assertEqual(cell_text(1, 2), ["n/a"])
+        self.assertEqual(cell_text(2, 0), ["audleytravel.com"])
+
+        fills = {
+            request["updateTableCellProperties"]["tableRange"]["location"]["rowIndex"]: request[
+                "updateTableCellProperties"
+            ]["tableCellProperties"]["tableCellBackgroundFill"]["solidFill"]["color"]["rgbColor"]
+            for request in requests
+            if request.get("updateTableCellProperties", {}).get("objectId") == "p29_i720"
+        }
+        self.assertEqual(fills[0], {"red": 0.0, "green": 0.0, "blue": 0.0})
+        self.assertEqual(fills[1], {"red": 0.988, "green": 0.894, "blue": 0.925})
+        self.assertNotIn(2, fills)
         self.assertTrue(
             any(
-                request.get("insertText", {}).get("objectId") == "p29_i720"
-                and request["insertText"].get("cellLocation")
-                == {"rowIndex": 0, "columnIndex": 0}
-                and request["insertText"]["text"] == "Source"
-                for request in fake_client.batch_requests
-            )
-        )
-        self.assertTrue(
-            any(
-                request.get("insertText", {}).get("objectId") == "p29_i720"
-                and request["insertText"].get("cellLocation")
-                == {"rowIndex": 1, "columnIndex": 0}
-                and request["insertText"]["text"] == "Google Ads"
-                for request in fake_client.batch_requests
+                request.get("insertText", {}).get("objectId") == "p29_i718"
+                and request["insertText"]["text"] == "Source: Google Ads Auction Insights"
+                for request in requests
             )
         )
 

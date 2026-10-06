@@ -309,6 +309,30 @@ class WendyWuQbrTests(unittest.TestCase):
         self.assertNotIn("Central Asia & Mongolia", australia_report["available_destinations"])
         self.assertAlmostEqual(australia_report["destinations"]["Other"]["total"]["Cost"], 900.0)
 
+    def test_se_asia_destinations_roll_into_se_asia_for_uk_and_australia(self) -> None:
+        csv_path = _write_se_asia_fixture()
+        for client_id in ("wendy_wu", "wendy_wu_australia"):
+            with self.subTest(client_id=client_id):
+                client_config, _, report, _ = _prepare_report(client_id, csv_path)
+
+                se_asia = report["destinations"]["SE Asia"]["total"]
+                self.assertAlmostEqual(se_asia["Cost"], 10 * len(SE_ASIA_FIXTURE_DESTINATIONS))
+                self.assertAlmostEqual(se_asia["Sales Leads"], len(SE_ASIA_FIXTURE_DESTINATIONS))
+                self.assertAlmostEqual(report["destinations"]["China"]["total"]["Cost"], 100.0)
+                self.assertAlmostEqual(report["destinations"]["Japan"]["total"]["Cost"], 200.0)
+                self.assertAlmostEqual(report["destinations"]["India"]["total"]["Cost"], 300.0)
+                self.assertAlmostEqual(report["destinations"]["Other"]["total"]["Cost"], 40.0)
+
+                aliases = client_config["destination_aliases"]["SE Asia"]
+                for destination in ("Vietnam", "Cambodia", "Vietnam & Cambodia", "Vietnam and Cambodia",
+                                    "Thailand", "Malaysia", "Indonesia", "Borneo", "Philippines"):
+                    self.assertIn(destination, aliases)
+
+        uk_config = CONFIG_LOADER.get_client_config("wendy_wu")
+        australia_config = CONFIG_LOADER.get_client_config("wendy_wu_australia")
+        self.assertIn("Central Asia & Mongolia", uk_config["destination_aliases"])
+        self.assertNotIn("Central Asia & Mongolia", australia_config["destination_aliases"])
+
     def test_destination_campaign_mix_includes_inline_yoy_for_all_visible_metrics(self) -> None:
         csv_path = _write_destination_mix_yoy_fixture()
         client_config, quarter, report, _ = _prepare_report("wendy_wu_australia", csv_path)
@@ -551,6 +575,44 @@ def _write_single_quarter_fixture() -> Path:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
         frame.to_csv(tmp.name, index=False)
     return Path(tmp.name)
+
+
+SE_ASIA_FIXTURE_DESTINATIONS = (
+    "Vietnam",
+    "Cambodia",
+    "Vietnam & Cambodia",
+    "Vietnam and Cambodia",
+    "vietnam  &  cambodia",
+    "Thailand",
+    "MALAYSIA",
+    "Malaysia & Borneo",
+    "Indonesia",
+    "Borneo",
+    "Philippines",
+    "SE Asia",
+)
+
+
+def _write_se_asia_fixture() -> Path:
+    rows = []
+    for year in (2025, 2026):
+        for month in (1, 2, 3):
+            date = f"01/{month:02d}/{year}"
+            # Only Q1 2026 carries costs so totals are easy to assert.
+            factor = 1.0 if (year == 2026 and month == 1) else 0.0
+            for destination, cost in (("China", 100), ("Japan", 200), ("India", 300), ("Laos", 40)):
+                rows.append(
+                    {"Date": date, "Campaign Type": "Generic", "Destination": destination, "Impressions": 1000,
+                     "Clicks": 100, "Cost": cost * factor, "Sales Leads": 5 * factor}
+                )
+            for destination in SE_ASIA_FIXTURE_DESTINATIONS:
+                rows.append(
+                    {"Date": date, "Campaign Type": "Generic", "Destination": destination, "Impressions": 100,
+                     "Clicks": 10, "Cost": 10 * factor, "Sales Leads": 1 * factor}
+                )
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
+        pd.DataFrame(rows).to_csv(tmp.name, index=False)
+        return Path(tmp.name)
 
 
 def _write_central_asia_fixture() -> Path:

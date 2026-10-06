@@ -97,16 +97,29 @@ WHITE_RGB = {"red": 1.0, "green": 1.0, "blue": 1.0}
 POSITIVE_RGB = {"red": 0.03, "green": 0.47, "blue": 0.22}
 NEGATIVE_RGB = {"red": 0.78, "green": 0.16, "blue": 0.13}
 CARD_METRIC_ORDER = ("Sales Leads", "Cost", "CPL", "CVR", "Clicks", "CTR")
+AUCTION_TABLE_ID = "p29_i720"
+AUCTION_TITLE = "Non-Brand Auction Insights"
 AUCTION_HEADERS = (
-    "Source",
     "Domain",
-    "Impression Share",
+    "Imp. Share",
     "Overlap Rate",
-    "Position Above Rate",
-    "Top of Page Rate",
-    "Absolute Top Rate",
-    "Outranking Share",
+    "Pos. Above",
+    "Top of Page",
+    "Abs. Top",
+    "Outranking",
 )
+AUCTION_VALUE_COLUMNS = (
+    "impression_share",
+    "overlap_rate",
+    "position_above_rate",
+    "top_of_page_rate",
+    "absolute_top_of_page_rate",
+    "outranking_share",
+)
+AUCTION_MAX_BODY_ROWS = 8
+AUCTION_PREFERRED_SOURCE = "Google Ads"
+AUCTION_OWN_DOMAIN = "you"
+AUCTION_HIGHLIGHT_RGB = {"red": 0.988, "green": 0.894, "blue": 0.925}
 
 
 SUMMARY_SLIDES: dict[str, dict[str, Any]] = {
@@ -389,6 +402,9 @@ def generate_wendy_wu_qbr_google_slides(
                     existing_cell_text=table_cell_text.get(table_id, {}),
                     column_widths=table_widths.get(table_id, []),
                 )
+            )
+            requests_body.extend(
+                _table_fill_requests(table_id, table_payload)
             )
 
         uploaded_assets = _upload_chart_assets(asset_store, payload["charts"])
@@ -905,50 +921,40 @@ def _populate_auction_section(
     subtitle: str,
     warnings: list[str],
 ) -> None:
+    shape_text["p29_i714"] = AUCTION_TITLE
     shape_text["p29_i715"] = subtitle
-    shape_text["p29_i718"] = config_loader.get_source_note(
-        "auction_insights", client_config
-    ) or "Source: Google Ads and Microsoft Ads Auction Insights"
+    shape_text["p29_i718"] = _auction_source_note(AUCTION_PREFERRED_SOURCE)
     if not auction_sources and not auction_path:
         warnings.append(
-            "Manual Google Ads and Microsoft Ads Auction Insights CSVs were not uploaded; auction slide marked review-required."
+            "Manual Google Ads Auction Insights CSV was not uploaded; auction slide marked review-required."
         )
-        tables["p29_i720"] = {
-            "values": [
-                list(AUCTION_HEADERS),
-                [
-                    "Manual upload required",
-                    "Manual upload required",
-                    "Review required",
-                    "Review required",
-                    "Review required",
-                    "Review required",
-                    "Review required",
-                    "Review required",
-                ],
-            ]
-        }
+        tables[AUCTION_TABLE_ID] = _auction_table_payload(
+            [["Manual upload required", *["Review required"] * (len(AUCTION_HEADERS) - 1)]]
+        )
         shape_text["p29_i719"] = (
-            "Review required: export Auction Insights from Google Ads and Microsoft Ads "
+            "Review required: export Non-Brand Auction Insights from Google Ads "
             "for the same QBR period and regenerate or update this slide."
         )
         return
 
     if auction_sources:
-        expected_sources = {"Google Ads", "Microsoft Ads"}
-        missing_sources = sorted(expected_sources - set(auction_sources))
-        if missing_sources:
+        if AUCTION_PREFERRED_SOURCE not in auction_sources:
             warnings.append(
-                "Auction Insights is missing manual upload(s): "
-                + ", ".join(missing_sources)
-                + "."
+                "Auction Insights is missing the manual Google Ads upload; "
+                "the slide uses the available platform export instead."
             )
         auction_df = load_cross_platform_auction_csvs(auction_sources)
     else:
         auction_df = load_auction_csv(auction_path)
+    auction_df, source_label = _select_auction_platform(auction_df)
+    if source_label:
+        shape_text["p29_i718"] = _auction_source_note(source_label)
+    auction_df = _mark_own_auction_rows(
+        auction_df, client_config.get("auction_insights", {}).get("client_domain")
+    )
     summary = summarize_auction_insights(
         auction_df,
-        client_domain=client_config.get("auction_insights", {}).get("client_domain"),
+        client_domain=AUCTION_OWN_DOMAIN,
         known_competitors=client_config.get("auction_insights", {}).get(
             "known_competitors", []
         ),
@@ -957,21 +963,124 @@ def _populate_auction_section(
         warnings.append(
             "Manual Auction Insights CSV was uploaded but no usable summary could be generated."
         )
-        tables["p29_i720"] = {
-            "values": [list(AUCTION_HEADERS), ["No usable rows", "", "", "", "", "", "", ""]]
-        }
+        tables[AUCTION_TABLE_ID] = _auction_table_payload(
+            [["No usable rows", *["n/a"] * (len(AUCTION_HEADERS) - 1)]]
+        )
         shape_text["p29_i719"] = "Review required: Auction Insights CSV had no usable rows."
         return
 
-    table_df = summary["table"].head(8)
-    tables["p29_i720"] = {"values": _table_values(table_df)}
-    bullets = list(generate_auction_bullets(summary))
-    if auction_sources:
-        bullets.insert(
-            0,
-            "Google Ads and Microsoft Ads rows are shown separately because Auction Insights percentages are platform-specific.",
+    tables[AUCTION_TABLE_ID] = _auction_table_payload(_auction_table_rows(auction_df))
+    shape_text["p29_i719"] = "\n".join(generate_auction_bullets(summary))
+
+
+def _auction_source_note(source_label: str) -> str:
+    return f"Source: {source_label} Auction Insights"
+
+
+def _select_auction_platform(auction_df: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
+    """Keep one platform so the slide table needs no Source column.
+
+    Google Ads is preferred; another platform is only used when Google Ads rows are absent.
+    """
+    if "source" not in auction_df.columns or auction_df.empty:
+        return auction_df, None
+    sources = [str(value) for value in auction_df["source"].dropna().unique()]
+    if not sources:
+        return auction_df, None
+    selected = AUCTION_PREFERRED_SOURCE if AUCTION_PREFERRED_SOURCE in sources else sources[0]
+    platform_df = auction_df[auction_df["source"] == selected].drop(columns=["source"])
+    return platform_df.reset_index(drop=True), selected
+
+
+def _mark_own_auction_rows(auction_df: pd.DataFrame, client_domain: Any) -> pd.DataFrame:
+    if auction_df.empty or "domain" not in auction_df.columns:
+        return auction_df
+    own_domains = {AUCTION_OWN_DOMAIN}
+    client_key = str(client_domain or "").strip().lower().replace("www.", "").strip("/")
+    if client_key:
+        own_domains.add(client_key)
+    marked = auction_df.copy()
+    marked["domain"] = marked["domain"].map(
+        lambda value: AUCTION_OWN_DOMAIN if str(value).strip().lower() in own_domains else value
+    )
+    return marked
+
+
+def _auction_table_rows(auction_df: pd.DataFrame) -> list[list[str]]:
+    """Own row first, then competitors by impression share (highest first)."""
+    own_df = auction_df[auction_df["domain"] == AUCTION_OWN_DOMAIN].head(1)
+    competitor_df = auction_df[auction_df["domain"] != AUCTION_OWN_DOMAIN]
+    if "impression_share" in competitor_df.columns:
+        competitor_df = competitor_df.sort_values(
+            "impression_share", ascending=False, na_position="last", kind="stable"
         )
-    shape_text["p29_i719"] = "\n".join(bullets)
+    competitor_limit = AUCTION_MAX_BODY_ROWS - len(own_df)
+    ordered = pd.concat([own_df, competitor_df.head(competitor_limit)], ignore_index=True)
+    rows = []
+    for _, row in ordered.iterrows():
+        domain = str(row["domain"])
+        rows.append(
+            [
+                "You" if domain == AUCTION_OWN_DOMAIN else domain,
+                *(_format_auction_pct(row.get(column)) for column in AUCTION_VALUE_COLUMNS),
+            ]
+        )
+    return rows
+
+
+def _format_auction_pct(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return "n/a"
+    return f"{float(value) * 100:.1f}%"
+
+
+def _auction_table_payload(body_rows: Sequence[Sequence[str]]) -> dict[str, Any]:
+    return {
+        "values": [list(AUCTION_HEADERS), *(list(row) for row in body_rows)],
+        "header_fill_rgb": BLACK_RGB,
+        "highlight_rows": [
+            index
+            for index, row in enumerate(body_rows, start=1)
+            if row and str(row[0]).strip().lower() == AUCTION_OWN_DOMAIN
+        ],
+        "highlight_fill_rgb": AUCTION_HIGHLIGHT_RGB,
+    }
+
+
+def _table_fill_requests(
+    table_id: str, table_payload: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    values = table_payload.get("values") or []
+    column_count = max((len(row) for row in values), default=0)
+    if column_count <= 0:
+        return []
+    fills: list[tuple[int, dict[str, float]]] = []
+    if table_payload.get("header_fill_rgb"):
+        fills.append((0, table_payload["header_fill_rgb"]))
+    highlight_rgb = table_payload.get("highlight_fill_rgb")
+    if highlight_rgb:
+        fills.extend(
+            (int(row_index), highlight_rgb)
+            for row_index in table_payload.get("highlight_rows") or []
+            if 0 < int(row_index) < len(values)
+        )
+    return [
+        {
+            "updateTableCellProperties": {
+                "objectId": table_id,
+                "tableRange": {
+                    "location": {"rowIndex": row_index, "columnIndex": 0},
+                    "rowSpan": 1,
+                    "columnSpan": column_count,
+                },
+                "tableCellProperties": {
+                    "tableCellBackgroundFill": {"solidFill": {"color": {"rgbColor": rgb}}}
+                },
+                "fields": "tableCellBackgroundFill.solidFill.color",
+            }
+        }
+        for row_index, rgb in fills
+    ]
 
 
 def _populate_review_required_sections(

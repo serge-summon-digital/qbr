@@ -1751,6 +1751,21 @@ def classify_destination(campaign_name: Any) -> str:
     return "Other"
 
 
+# Wendy Wu UK/AUS report every one of these markets under the SE Asia bucket.
+WENDY_WU_SE_ASIA_TERMS = (
+    "se asia",
+    "southeast asia",
+    "south east asia",
+    "vietnam",
+    "cambodia",
+    "thailand",
+    "malaysia",
+    "indonesia",
+    "borneo",
+    "philippines",
+)
+
+
 def classify_wendy_wu_uk_datastudio_destination(campaign_name: Any) -> str:
     normalized = _normalize_text(campaign_name)
     if "china" in normalized:
@@ -1774,13 +1789,7 @@ def classify_wendy_wu_uk_datastudio_destination(campaign_name: Any) -> str:
         return "Central Asia"
     if any(
         term in normalized
-        for term in (
-            "se asia",
-            "southeast asia",
-            "south east asia",
-            "vietnam",
-            "cambodia",
-        )
+        for term in WENDY_WU_SE_ASIA_TERMS
     ):
         return "SE Asia"
     return "Other"
@@ -1796,13 +1805,7 @@ def classify_wendy_wu_aus_datastudio_destination(campaign_name: Any) -> str:
         return "India"
     if any(
         term in normalized
-        for term in (
-            "se asia",
-            "southeast asia",
-            "south east asia",
-            "vietnam",
-            "cambodia",
-        )
+        for term in WENDY_WU_SE_ASIA_TERMS
     ):
         return "SE Asia"
     return "Other"

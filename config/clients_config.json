@@ -22,6 +22,26 @@
         "Central Asia & Mongolia"
       ],
       "destination_aliases": {
+        "SE Asia": [
+          "SE Asia",
+          "South East Asia",
+          "Southeast Asia",
+          "South-East Asia",
+          "Vietnam",
+          "Cambodia",
+          "Vietnam & Cambodia",
+          "Vietnam and Cambodia",
+          "Cambodia & Vietnam",
+          "Cambodia and Vietnam",
+          "Thailand",
+          "Malaysia",
+          "Malaysia & Borneo",
+          "Malaysia and Borneo",
+          "Indonesia",
+          "Borneo",
+          "Philippines",
+          "The Philippines"
+        ],
         "Central Asia & Mongolia": [
           "Central Asia",
           "Mongolia",
@@ -159,6 +179,28 @@
         "SE Asia",
         "India"
       ],
+      "destination_aliases": {
+        "SE Asia": [
+          "SE Asia",
+          "South East Asia",
+          "Southeast Asia",
+          "South-East Asia",
+          "Vietnam",
+          "Cambodia",
+          "Vietnam & Cambodia",
+          "Vietnam and Cambodia",
+          "Cambodia & Vietnam",
+          "Cambodia and Vietnam",
+          "Thailand",
+          "Malaysia",
+          "Malaysia & Borneo",
+          "Malaysia and Borneo",
+          "Indonesia",
+          "Borneo",
+          "Philippines",
+          "The Philippines"
+        ]
+      },
       "brand_trends": {
         "enabled": true,
         "terms": [
