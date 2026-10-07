@@ -31,7 +31,7 @@ from .google_workspace import (
     GoogleWorkspaceClient,
     GoogleWorkspaceConfig,
 )
-from .metrics import prepare_report_data, validate_report_data
+from .metrics import build_kpi_summary, prepare_report_data, validate_report_data
 from .monthly_google_slides_builder import (
     _read_json,
     _resolve_path,
@@ -97,6 +97,12 @@ WHITE_RGB = {"red": 1.0, "green": 1.0, "blue": 1.0}
 POSITIVE_RGB = {"red": 0.03, "green": 0.47, "blue": 0.22}
 NEGATIVE_RGB = {"red": 0.78, "green": 0.16, "blue": 0.13}
 CARD_METRIC_ORDER = ("Sales Leads", "Cost", "CPL", "CVR", "Clicks", "CTR")
+# Revenue is added at generation time as a seventh summary tile (the templates hold six).
+REVENUE_TILE_METRIC = "Revenue"
+REVENUE_TILE_ACCENT_RGB = {"red": 0.16, "green": 0.36, "blue": 0.6}
+REVENUE_TILE_ID_SUFFIX = "_rev"
+TILE_VALUE_FONT_PT = 13
+TILE_VALUE_WIDTH_SHARE = 0.94
 AUCTION_TABLE_ID = "p29_i720"
 AUCTION_TITLE = "Non-Brand Auction Insights"
 AUCTION_HEADERS = (
@@ -392,6 +398,9 @@ def generate_wendy_wu_qbr_google_slides(
         requests_body: list[dict[str, Any]] = []
         requests_body.extend(build_period_replacement_requests(payload["artifact"]))
         requests_body.extend(_build_scalar_text_requests(payload["shape_text"], presentation))
+        requests_body.extend(
+            _revenue_tile_requests(presentation, payload.get("revenue_tiles") or {})
+        )
         table_dimensions = _table_dimensions_by_id(presentation)
         table_cell_text = _table_cell_text_by_id(presentation)
         table_widths = _table_widths_by_id(presentation)
@@ -591,7 +600,10 @@ def build_wendy_wu_qbr_slides_payload(
     )
     _populate_review_required_sections(shape_text, subtitle, footer, quarter.label)
 
+    revenue_tiles = _revenue_tile_payload(report)
     _localize_payload_currency(shape_text, tables, currency["symbol"])
+    for tile in revenue_tiles.values():
+        tile["value"] = _localize_currency_text(tile["value"], currency["symbol"])
 
     manifest = template_manifest or _read_json(_template_manifest_path(client_id))
     return {
@@ -614,6 +626,7 @@ def build_wendy_wu_qbr_slides_payload(
         },
         "shape_text": shape_text,
         "tables": tables,
+        "revenue_tiles": revenue_tiles,
         "charts": charts,
         "performance_csv": str(performance_csv),
         "currency": currency,
@@ -1488,6 +1501,290 @@ def _build_cost_delta_style_requests(presentation: Mapping[str, Any]) -> list[di
         if delta_id in existing_ids:
             requests_body.append(_text_color_request(delta_id, NEUTRAL_DELTA_RGB))
     return requests_body
+
+
+def _revenue_tile_payload(report: Mapping[str, Any]) -> dict[str, dict[str, str]]:
+    """Value and YoY text for the Revenue tile on each summary slide."""
+    if not report.get("include_revenue"):
+        return {}
+    tiles: dict[str, dict[str, str]] = {}
+    for key, section in SUMMARY_SLIDES.items():
+        scope = _scope_for_section(report, section)
+        # Quarterly scope KPIs omit Revenue, but totals and YoY carry it.
+        kpis = (
+            _kpi_lookup({"kpis": build_kpi_summary(scope["total"], scope["yoy"], include_revenue=True)})
+            if scope
+            else {}
+        )
+        tiles[key] = {
+            "value": _whole_currency(_kpi_value(kpis, REVENUE_TILE_METRIC)),
+            "yoy": f"YoY: {_kpi_yoy(kpis, REVENUE_TILE_METRIC)}",
+        }
+    return tiles
+
+
+def _whole_currency(value: str) -> str:
+    # Quarterly revenue runs to seven figures; pence would not fit a narrowed tile.
+    return re.sub(r"(\d)\.\d{2}$", r"\1", str(value))
+
+
+def _revenue_tile_requests(
+    presentation: Mapping[str, Any], revenue_tiles: Mapping[str, Mapping[str, str]]
+) -> list[dict[str, Any]]:
+    """Narrow each summary slide's six KPI tiles and append a seventh Revenue tile."""
+    elements = _top_level_elements_by_id(presentation)
+    requests_body: list[dict[str, Any]] = []
+    for key, tile_text in revenue_tiles.items():
+        section = SUMMARY_SLIDES.get(key)
+        if not section:
+            continue
+        tiles = _summary_tiles(elements, section)
+        if tiles is None:
+            continue
+        requests_body.extend(_seven_tile_requests(tiles, section, tile_text, elements))
+    return requests_body
+
+
+def _top_level_elements_by_id(presentation: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    elements: dict[str, dict[str, Any]] = {}
+    for slide in presentation.get("slides") or []:
+        slide_id = str(slide.get("objectId") or "")
+        for element in slide.get("pageElements") or []:
+            box = _element_box(element)
+            if box is None or "shape" not in element:
+                continue
+            elements[str(element.get("objectId"))] = {
+                "element": element,
+                "slide_id": slide_id,
+                "box": box,
+                "has_text": bool(_shape_plain_text(element).strip()),
+            }
+    return elements
+
+
+def _element_box(element: Mapping[str, Any]) -> tuple[float, float, float, float] | None:
+    transform = element.get("transform") or {}
+    size = element.get("size") or {}
+    width = (size.get("width") or {}).get("magnitude")
+    height = (size.get("height") or {}).get("magnitude")
+    if not width or not height or transform.get("shearX") or transform.get("shearY"):
+        return None
+    return (
+        float(transform.get("translateX", 0.0)),
+        float(transform.get("translateY", 0.0)),
+        float(width) * float(transform.get("scaleX", 1.0)),
+        float(height) * float(transform.get("scaleY", 1.0)),
+    )
+
+
+def _shape_plain_text(element: Mapping[str, Any]) -> str:
+    text = ((element.get("shape") or {}).get("text") or {}).get("textElements") or []
+    return "".join((item.get("textRun") or {}).get("content", "") for item in text)
+
+
+def _summary_tiles(
+    elements: Mapping[str, Mapping[str, Any]], section: Mapping[str, Any]
+) -> list[list[str]] | None:
+    """Group the slide's shapes into the six tiles: each card plus everything drawn on it."""
+    value_ids = [str(value_id) for value_id in section.get("value_ids") or []]
+    if len(value_ids) != len(CARD_METRIC_ORDER) or any(v not in elements for v in value_ids):
+        return None
+    slide_id = elements[value_ids[0]]["slide_id"]
+    slide_elements = {k: v for k, v in elements.items() if v["slide_id"] == slide_id}
+    tiles: list[list[str]] = []
+    for value_id in value_ids:
+        vx, vy, vw, vh = slide_elements[value_id]["box"]
+        centre = (vx + vw / 2, vy + vh / 2)
+        cards = [
+            (item["box"][2] * item["box"][3], object_id)
+            for object_id, item in slide_elements.items()
+            if not item["has_text"] and _box_contains(item["box"], centre)
+        ]
+        if not cards:
+            return None
+        card_id = max(cards)[1]
+        card_box = slide_elements[card_id]["box"]
+        members = [
+            object_id
+            for object_id, item in slide_elements.items()
+            if _box_contains(card_box, _box_centre(item["box"]))
+        ]
+        tiles.append([card_id] + [m for m in members if m != card_id])
+    return tiles
+
+
+def _box_centre(box: tuple[float, float, float, float]) -> tuple[float, float]:
+    return box[0] + box[2] / 2, box[1] + box[3] / 2
+
+
+def _box_contains(box: tuple[float, float, float, float], point: tuple[float, float]) -> bool:
+    x, y, w, h = box
+    return x <= point[0] <= x + w and y <= point[1] <= y + h
+
+
+def _seven_tile_requests(
+    tiles: list[list[str]],
+    section: Mapping[str, Any],
+    tile_text: Mapping[str, str],
+    elements: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    value_ids = [str(value_id) for value_id in section["value_ids"]]
+    delta_ids = [str(delta_id) for delta_id in section["delta_ids"]]
+    card_boxes = [elements[tile[0]]["box"] for tile in tiles]
+    left = card_boxes[0][0]
+    right = card_boxes[-1][0] + card_boxes[-1][2]
+    gap = max(0.0, card_boxes[1][0] - (card_boxes[0][0] + card_boxes[0][2]))
+    tile_count = len(tiles) + 1
+    tile_width = (right - left - gap * (tile_count - 1)) / tile_count
+
+    source_tile = tiles[-1]
+    new_ids = {object_id: f"{object_id}{REVENUE_TILE_ID_SUFFIX}" for object_id in source_tile}
+    requests_body: list[dict[str, Any]] = [
+        {"duplicateObject": {"objectId": object_id, "objectIds": {object_id: new_id}}}
+        for object_id, new_id in new_ids.items()
+    ]
+
+    placements = [(tile, value_ids[index], {}) for index, tile in enumerate(tiles)]
+    placements.append((source_tile, value_ids[-1], new_ids))
+    for index, (tile, value_id, rename) in enumerate(placements):
+        card_x, _card_y, card_w, _card_h = elements[tile[0]]["box"]
+        scale = tile_width / card_w
+        tile_left = left + index * (tile_width + gap)
+        for object_id in tile:
+            x, y, w, _h = elements[object_id]["box"]
+            if object_id == value_id:
+                new_width = tile_width * TILE_VALUE_WIDTH_SHARE
+                new_x = tile_left + (tile_width - new_width) / 2
+            else:
+                new_width = w * scale
+                new_x = tile_left + (x - card_x) * scale
+            requests_body.append(
+                _absolute_transform_request(
+                    rename.get(object_id, object_id), elements[object_id]["element"], new_x, y, new_width
+                )
+            )
+
+    source_value, source_delta = value_ids[-1], delta_ids[-1]
+    label_ids = [
+        object_id
+        for object_id in source_tile
+        if elements[object_id]["has_text"] and object_id not in {source_value, source_delta}
+    ]
+    texts = {new_ids[source_value]: tile_text["value"]}
+    if source_delta in new_ids:
+        texts[new_ids[source_delta]] = tile_text["yoy"]
+    if label_ids:
+        texts[new_ids[label_ids[0]]] = REVENUE_TILE_METRIC
+    for object_id, text in texts.items():
+        requests_body.append({"deleteText": {"objectId": object_id, "textRange": {"type": "ALL"}}})
+        requests_body.append(
+            {"insertText": {"objectId": object_id, "insertionIndex": 0, "text": str(text)}}
+        )
+    if label_ids:
+        # Values and deltas on the other tiles are rewritten too and fall back to the
+        # default style; labels keep the template styling, so restore it on ours.
+        style_request = _copy_text_style_request(
+            new_ids[label_ids[0]], elements[label_ids[0]]["element"]
+        )
+        if style_request:
+            requests_body.append(style_request)
+    if source_delta in new_ids:
+        requests_body.append(
+            _text_color_request(new_ids[source_delta], _delta_rgb(tile_text["yoy"]))
+        )
+
+    for value_id in [*value_ids, new_ids[source_value]]:
+        requests_body.append(
+            {
+                "updateTextStyle": {
+                    "objectId": value_id,
+                    "textRange": {"type": "ALL"},
+                    "style": {"fontSize": {"magnitude": TILE_VALUE_FONT_PT, "unit": "PT"}},
+                    "fields": "fontSize",
+                }
+            }
+        )
+
+    card_height = elements[source_tile[0]]["box"][3]
+    for object_id in source_tile[1:]:
+        if not elements[object_id]["has_text"] and elements[object_id]["box"][3] < card_height * 0.2:
+            requests_body.append(
+                {
+                    "updateShapeProperties": {
+                        "objectId": new_ids[object_id],
+                        "shapeProperties": {
+                            "shapeBackgroundFill": {
+                                "solidFill": {"color": {"rgbColor": dict(REVENUE_TILE_ACCENT_RGB)}}
+                            },
+                            "outline": {
+                                "outlineFill": {
+                                    "solidFill": {"color": {"rgbColor": dict(REVENUE_TILE_ACCENT_RGB)}}
+                                }
+                            },
+                        },
+                        "fields": "shapeBackgroundFill.solidFill.color,outline.outlineFill.solidFill.color",
+                    }
+                }
+            )
+    return requests_body
+
+
+def _copy_text_style_request(object_id: str, source: Mapping[str, Any]) -> dict[str, Any] | None:
+    text_elements = ((source.get("shape") or {}).get("text") or {}).get("textElements") or []
+    style = next(
+        (
+            (item.get("textRun") or {}).get("style")
+            for item in text_elements
+            if (item.get("textRun") or {}).get("content", "").strip()
+        ),
+        None,
+    )
+    if not style:
+        return None
+    copied = {
+        field: style[field]
+        for field in ("foregroundColor", "fontSize", "fontFamily", "bold")
+        if field in style
+    }
+    if not copied:
+        return None
+    return {
+        "updateTextStyle": {
+            "objectId": object_id,
+            "textRange": {"type": "ALL"},
+            "style": copied,
+            "fields": ",".join(copied),
+        }
+    }
+
+
+def _absolute_transform_request(
+    object_id: str, element: Mapping[str, Any], x: float, y: float, width: float
+) -> dict[str, Any]:
+    transform = element.get("transform") or {}
+    base_width = float(((element.get("size") or {}).get("width") or {}).get("magnitude") or 1.0)
+    return {
+        "updatePageElementTransform": {
+            "objectId": object_id,
+            "applyMode": "ABSOLUTE",
+            "transform": {
+                "scaleX": width / base_width,
+                "scaleY": float(transform.get("scaleY", 1.0)),
+                "shearX": 0,
+                "shearY": 0,
+                "translateX": round(x),
+                "translateY": round(y),
+                "unit": "EMU",
+            },
+        }
+    }
+
+
+def _delta_rgb(label: str) -> dict[str, float]:
+    match = re.search(r"([+-])\d", str(label))
+    if not match:
+        return dict(NEUTRAL_DELTA_RGB)
+    return dict(POSITIVE_RGB if match.group(1) == "+" else NEGATIVE_RGB)
 
 
 def _text_color_request(object_id: str, rgb: Mapping[str, float]) -> dict[str, Any]:

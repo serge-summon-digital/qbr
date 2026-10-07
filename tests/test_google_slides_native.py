@@ -41,6 +41,8 @@ from src.olympic_qbr_google_slides_builder import (
     build_olympic_qbr_slides_payload,
 )
 from src.wendy_wu_qbr_google_slides_builder import (
+    SUMMARY_SLIDES,
+    _revenue_tile_requests,
     build_wendy_wu_qbr_slides_payload,
 )
 from src.wightlink_monthly_google_slides_builder import (
@@ -929,6 +931,74 @@ class WendyWuQbrNativeSlidesTests(unittest.TestCase):
                     "microsoft_auction.csv"
                 )
             )
+
+    def test_qbr_payload_includes_revenue_tile_for_every_summary_slide(self) -> None:
+        for client_id, client_name, symbol in (
+            ("wendy_wu", "Wendy Wu Tours", "£"),
+            ("wendy_wu_australia", "Wendy Wu Tours Australia", "$"),
+        ):
+            with self.subTest(client_id=client_id), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                artifact_path = _write_wendy_wu_qbr_artifact(
+                    root, client_id=client_id, client_name=client_name
+                )
+                payload = build_wendy_wu_qbr_slides_payload(
+                    request_dir=root,
+                    artifact=json.loads(artifact_path.read_text(encoding="utf-8")),
+                    client_id=client_id,
+                )
+
+            tiles = payload["revenue_tiles"]
+            self.assertEqual(set(tiles), set(SUMMARY_SLIDES))
+            self.assertRegex(tiles["overall"]["value"], rf"^\{symbol}[\d,]+$")
+            self.assertTrue(tiles["overall"]["yoy"].startswith("YoY: "))
+
+    def test_revenue_tile_requests_fit_seven_tiles_in_original_width(self) -> None:
+        section = SUMMARY_SLIDES["overall"]
+        presentation = {"slides": [{"objectId": "p7", "pageElements": _fake_tile_row(section)}]}
+
+        requests = _revenue_tile_requests(
+            presentation, {"overall": {"value": "£1,234,567", "yoy": "YoY: -4.20%"}}
+        )
+
+        duplicated = [r["duplicateObject"]["objectId"] for r in requests if "duplicateObject" in r]
+        self.assertEqual(len(duplicated), 5)
+        transforms = {
+            r["updatePageElementTransform"]["objectId"]: r["updatePageElementTransform"]["transform"]
+            for r in requests
+            if "updatePageElementTransform" in r
+        }
+        cards = [f"card{index}" for index in range(6)] + ["card5_rev"]
+        lefts = [transforms[card]["translateX"] for card in cards]
+        widths = [100 * transforms[card]["scaleX"] for card in cards]
+        self.assertEqual(lefts, sorted(lefts))
+        self.assertEqual(lefts[0], 100)
+        self.assertAlmostEqual(lefts[-1] + widths[-1], 100 + 5 * 1500 + 1400, delta=2)
+        inserted = {
+            r["insertText"]["objectId"]: r["insertText"]["text"] for r in requests if "insertText" in r
+        }
+        value_id = f"{section['value_ids'][-1]}_rev"
+        delta_id = f"{section['delta_ids'][-1]}_rev"
+        self.assertEqual(inserted[value_id], "£1,234,567")
+        self.assertEqual(inserted[delta_id], "YoY: -4.20%")
+        self.assertEqual(inserted["label5_rev"], "Revenue")
+        self.assertTrue(
+            any(
+                r.get("updateTextStyle", {}).get("objectId") == delta_id
+                and r["updateTextStyle"]["style"].get("foregroundColor", {}).get("opaqueColor", {}).get("rgbColor")
+                == {"red": 0.78, "green": 0.16, "blue": 0.13}
+                for r in requests
+            )
+        )
+        self.assertTrue(
+            any(r.get("updateShapeProperties", {}).get("objectId") == "bar5_rev" for r in requests)
+        )
+
+    def test_revenue_tile_skipped_when_tiles_not_found(self) -> None:
+        self.assertEqual(
+            _revenue_tile_requests({"slides": []}, {"overall": {"value": "£1", "yoy": "YoY: n/a"}}),
+            [],
+        )
 
     def test_qbr_payload_auction_table_falls_back_to_available_platform(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2330,6 +2400,37 @@ def _write_wendy_wu_qbr_artifact(
     artifact_path = root / "report_artifacts.json"
     artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
     return artifact_path
+
+
+def _fake_tile_row(section: dict) -> list[dict]:
+    """Six 1400-wide KPI cards, 100 apart, each with bar, value, label and delta shapes."""
+
+    def shape(object_id: str, x: int, y: int, w: int, h: int, text: str = "") -> dict:
+        element = {
+            "objectId": object_id,
+            "size": {"width": {"magnitude": 100, "unit": "EMU"}, "height": {"magnitude": 100, "unit": "EMU"}},
+            "transform": {"scaleX": w / 100, "scaleY": h / 100, "translateX": x, "translateY": y, "unit": "EMU"},
+            "shape": {"shapeType": "RECTANGLE"},
+        }
+        if text:
+            element["shape"]["text"] = {
+                "textElements": [{"textRun": {"content": text + "\n", "style": {"fontSize": {"magnitude": 8, "unit": "PT"}}}}]
+            }
+        return element
+
+    elements = []
+    for index in range(6):
+        x = 100 + index * 1500
+        elements.extend(
+            [
+                shape(f"card{index}", x, 800, 1400, 1000),
+                shape(f"bar{index}", x, 800, 1400, 50),
+                shape(str(section["value_ids"][index]), x + 70, 900, 1260, 400, "123"),
+                shape(f"label{index}", x + 50, 1300, 1300, 200, "Metric"),
+                shape(str(section["delta_ids"][index]), x + 50, 1550, 1300, 200, "YoY: +1%"),
+            ]
+        )
+    return elements
 
 
 def _write_platform_auction_csv(
